@@ -12,6 +12,7 @@ import com.stuypulse.stuylib.math.*;
 import com.stuypulse.stuylib.streams.*;
 import com.stuypulse.stuylib.streams.filters.*;
 import com.stuypulse.stuylib.network.limelight.*;
+import com.stuypulse.stuylib.pid.PIDController;
 
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
@@ -39,7 +40,7 @@ public class Robot extends TimedRobot {
     SmartDashboard.putData("Auto choices", m_chooser);
 
     Limelight.setLEDMode(Limelight.LEDMode.FORCE_OFF);
-    
+
     leftFrontMotor = new WPI_TalonSRX(1);
     rightFrontMotor = new WPI_TalonSRX(3);
     leftRearMotor = new WPI_TalonSRX(4);
@@ -71,16 +72,16 @@ public class Robot extends TimedRobot {
   @Override
   public void autonomousPeriodic() {
     switch (m_autoSelected) {
-      case kCustomAuto:
-        break;
-      case kDefaultAuto:
-      default:
-        break;
+    case kCustomAuto:
+      break;
+    case kDefaultAuto:
+    default:
+      break;
     }
   }
 
   private double toFeet(int feet, double inches) {
-    return ((double)feet) + (inches / 12.0);
+    return ((double) feet) + (inches / 12.0);
   }
 
   public Gamepad gamepad = new Logitech.XMode(0);
@@ -88,20 +89,12 @@ public class Robot extends TimedRobot {
   public IStream mRawSpeed = () -> gamepad.getRawRightTriggerAxis() - gamepad.getRawLeftTriggerAxis();
   public IStream mRawAngle = () -> gamepad.getLeftX();
 
-  public IStream mSpeed = new FilteredIStream(mRawSpeed,
-    new RollingAverage(24)
-  );
+  public IStream mSpeed = new FilteredIStream(mRawSpeed, new RollingAverage(24));
 
-  public IStream mAngle = new FilteredIStream(mRawAngle,
-    new RollingAverage(12)
-  );
+  public IStream mAngle = new FilteredIStream(mRawAngle, new RollingAverage(12));
 
   // If the robot is aligning
   public boolean mAutoMode = false;
-
-  // Used to get derivative speed and angle
-  public double mLastAutoDist = 0;
-  public double mLastAutoAngle = 0;
 
   // Feet, units dont matter as long as they are consistant
   public double kGoalHeight = toFeet(7, 7);
@@ -110,38 +103,43 @@ public class Robot extends TimedRobot {
   public double kTargetDistance = toFeet(10, 0);
 
   // Information about the Limelights Position
-  public double kLimelightHeight = toFeet(2, 7); // ft
+  public double kLimelightHeight = toFeet(2, 8); // ft
   public double kLimelightDistance = toFeet(2, 0); // ft from shooter
   public double kLimelightPitch = 28; // deg
   public double kLimelightAngle = 0; // deg
-  
+
   // Information for aligning algorithms
   public double kDistanceError = 0.2;
   public double kDistance_P = 0.6;
+  public double kDistance_I = 0.0;
   public double kDistance_D = 0.3;
+
   public double kAngleError = 2;
   public double kAngle_P = 0.1;
-  public double kAngle_D = 0.4;
+  public double kAngle_I = 0.0;
+  public double kAngle_D = 0.5;
 
   // Amount that user has control over the robot when aligning
   public double kUserBias = 0.3;
 
   public void resetSmartDashboard() {
     SmartDashboard.putNumber("Goal Height", kGoalHeight);
-    
+
     SmartDashboard.putNumber("Target Goal Distance", kTargetDistance);
-    
+
     SmartDashboard.putNumber("Limelight Height", kLimelightHeight);
     SmartDashboard.putNumber("Limelight Distance", kLimelightDistance);
     SmartDashboard.putNumber("Limelight Pitch", kLimelightPitch);
     SmartDashboard.putNumber("Limelight Angle", kLimelightAngle);
-    
+
     SmartDashboard.putNumber("Max Distance Error", kDistanceError);
     SmartDashboard.putNumber("Distance_P", kDistance_P);
+    SmartDashboard.putNumber("Distance_I", kDistance_I);
     SmartDashboard.putNumber("Distance_D", kDistance_D);
 
     SmartDashboard.putNumber("Max Angle Error", kAngleError);
     SmartDashboard.putNumber("Angle_P", kAngle_P);
+    SmartDashboard.putNumber("Angle_I", kAngle_I);
     SmartDashboard.putNumber("Angle_D", kAngle_D);
 
     SmartDashboard.putNumber("User Bias", kUserBias);
@@ -149,7 +147,7 @@ public class Robot extends TimedRobot {
 
   public void getSmartDashboard() {
     kGoalHeight = SmartDashboard.getNumber("Goal Height", kGoalHeight);
-    
+
     kTargetDistance = SmartDashboard.getNumber("Target Goal Distance", kTargetDistance);
 
     kLimelightHeight = SmartDashboard.getNumber("Limelight Height", kLimelightHeight);
@@ -159,14 +157,44 @@ public class Robot extends TimedRobot {
 
     kDistanceError = SmartDashboard.getNumber("Max Distance Error", kDistanceError);
     kDistance_P = SmartDashboard.getNumber("Distance_P", kDistance_P);
+    kDistance_I = SmartDashboard.getNumber("Distance_I", kDistance_I);
     kDistance_D = SmartDashboard.getNumber("Distance_D", kDistance_D);
 
     kAngleError = SmartDashboard.getNumber("Max Angle Error", kAngleError);
     kAngle_P = SmartDashboard.getNumber("Angle_P", kAngle_P);
+    kAngle_I = SmartDashboard.getNumber("Angle_I", kAngle_I);
     kAngle_D = SmartDashboard.getNumber("Angle_D", kAngle_D);
 
     kUserBias = SmartDashboard.getNumber("User Bias", kUserBias);
+
+    mAnglePID.setP(kAngle_P);
+    mAnglePID.setI(kAngle_I);
+    mAnglePID.setD(kAngle_D);
+
+    mDistancePID.setP(kDistance_P);
+    mDistancePID.setI(kDistance_I);
+    mDistancePID.setD(kDistance_D);
   }
+
+  public double getGoalDistance() {
+    // Get the angle and pitch of the target
+    double goal_pitch = Limelight.getTargetYAngle() + kLimelightPitch;
+
+    // Get the height of the goal reletive to the limelight
+    double goal_height = kGoalHeight - kLimelightHeight;
+
+    // Get the distance of the the target from the limelight using geometry
+    double goal_dist = goal_height / Math.tan(Math.toRadians(goal_pitch)) - kLimelightDistance;
+
+    // Return the distance to the target
+    return goal_dist;
+  }
+
+  public PIDController mAnglePID = new PIDController(() -> (Limelight.getTargetXAngle() + kLimelightAngle), kAngle_P,
+      kAngle_I, kAngle_D);
+
+  public PIDController mDistancePID = new PIDController(() -> (getGoalDistance() - kTargetDistance), kDistance_P,
+      kDistance_I, kDistance_D);
 
   @Override
   public void teleopPeriodic() {
@@ -174,65 +202,42 @@ public class Robot extends TimedRobot {
     double angle = mAngle.get();
 
     // Reset Settings
-    if(gamepad.getRawRightButton()) {
+    if (gamepad.getRawRightButton()) {
       resetSmartDashboard();
     }
 
     // Toggle auto mode with button
-    if(gamepad.getRawTopButton()) {
+    if (gamepad.getRawTopButton()) {
       mAutoMode = !mAutoMode;
 
       // Wait for button to be released
-      while(gamepad.getRawTopButton()) {}
+      while (gamepad.getRawTopButton()) {
+      }
     }
- 
+
     // Check if allignment button is pressed
-    if(gamepad.getRawLeftButton() || mAutoMode) {
+    if (gamepad.getRawLeftButton() || mAutoMode) {
       getSmartDashboard();
       Limelight.setLEDMode(Limelight.LEDMode.FORCE_ON);
 
       double auto_speed = 0;
       double auto_angle = 0;
-      
-      if(Limelight.hasValidTarget()) {
-        // Get the angle and pitch of the target
-        double goal_angle = Limelight.getTargetXAngle() + kLimelightAngle;
-        double goal_pitch = Limelight.getTargetYAngle() + kLimelightPitch;
 
-        // Get the height of the goal reletive to the limelight
-        double goal_height = kGoalHeight - kLimelightHeight;
-
-        // Get the distance of the the target from the limelight using geometry
-        double goal_dist = goal_height / Math.tan(Math.toRadians(goal_pitch)) - kLimelightDistance;
-
-        // Get the distance that the robot needs to travel
-        double dist_error = goal_dist - kTargetDistance;
-
-        // Get derivatives of speed and angle
-        double dist_change  = (mLastAutoDist  - dist_error);
-        double angle_change = (mLastAutoAngle - goal_angle);
-        mLastAutoDist  = dist_error;
-        mLastAutoAngle = goal_angle;
-
-        SmartDashboard.putNumber("Target X Angle", goal_angle);
-        SmartDashboard.putNumber("Target Y Angle", goal_pitch);
-
-        SmartDashboard.putNumber("Target Distance", goal_dist);
-        SmartDashboard.putNumber("Target Error", dist_error);
+      if (Limelight.hasValidTarget()) {
+        auto_speed = mDistancePID.get();
+        auto_angle = mAnglePID.get();
 
         // If the angle is good, then start moving
-        if((Math.abs(goal_angle) < kAngleError) && (Math.abs(dist_error) > kDistanceError)) {
-          auto_speed += dist_error * kDistance_P;
-          auto_angle -= dist_change * kDistance_D;
-        } 
+        if ((Math.abs(mAnglePID.getError()) < kAngleError) && (Math.abs(mDistancePID.getError()) > kDistanceError)) {
+          auto_angle *= 0.05;
+        }
 
         // Otherwise start turning towards the target
         else {
-          auto_angle += goal_angle * kAngle_P;
-          auto_angle -= angle_change * kAngle_D;
+          auto_speed *= 0.05;
         }
       }
-      
+
       // Limit speed and angle to prevent the alignment algorithm
       // from overriding the user inputs / give crazy values
       auto_speed = SLMath.limit(auto_speed, -1, 1);
