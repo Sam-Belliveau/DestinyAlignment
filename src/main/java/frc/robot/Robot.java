@@ -12,7 +12,7 @@ import com.stuypulse.stuylib.math.*;
 import com.stuypulse.stuylib.streams.*;
 import com.stuypulse.stuylib.streams.filters.*;
 import com.stuypulse.stuylib.network.limelight.*;
-import com.stuypulse.stuylib.pid.PIDController;
+import com.stuypulse.stuylib.control.PIDController;
 
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
@@ -109,15 +109,15 @@ public class Robot extends TimedRobot {
   public double kLimelightAngle = 0; // deg
 
   // Information for aligning algorithms
-  public double kDistanceError = 0.2;
-  public double kDistance_P = 0.6;
+  public double kDistanceError = 0.25;
+  public double kDistance_P = 0.8;
   public double kDistance_I = 0.0;
-  public double kDistance_D = 0.3;
+  public double kDistance_D = 0.4;
 
-  public double kAngleError = 2;
-  public double kAngle_P = 0.1;
+  public double kAngleError = 2.5;
+  public double kAngle_P = 0.2;
   public double kAngle_I = 0.0;
-  public double kAngle_D = 0.5;
+  public double kAngle_D = 0.1;
 
   // Amount that user has control over the robot when aligning
   public double kUserBias = 0.3;
@@ -176,25 +176,9 @@ public class Robot extends TimedRobot {
     mDistancePID.setD(kDistance_D);
   }
 
-  public double getGoalDistance() {
-    // Get the angle and pitch of the target
-    double goal_pitch = Limelight.getTargetYAngle() + kLimelightPitch;
+  public PIDController mAnglePID = new PIDController(kAngle_P, kAngle_I, kAngle_D);
 
-    // Get the height of the goal reletive to the limelight
-    double goal_height = kGoalHeight - kLimelightHeight;
-
-    // Get the distance of the the target from the limelight using geometry
-    double goal_dist = goal_height / Math.tan(Math.toRadians(goal_pitch)) - kLimelightDistance;
-
-    // Return the distance to the target
-    return goal_dist;
-  }
-
-  public PIDController mAnglePID = new PIDController(() -> (Limelight.getTargetXAngle() + kLimelightAngle), kAngle_P,
-      kAngle_I, kAngle_D);
-
-  public PIDController mDistancePID = new PIDController(() -> (getGoalDistance() - kTargetDistance), kDistance_P,
-      kDistance_I, kDistance_D);
+  public PIDController mDistancePID = new PIDController(kDistance_P, kDistance_I, kDistance_D);
 
   @Override
   public void teleopPeriodic() {
@@ -224,16 +208,27 @@ public class Robot extends TimedRobot {
       double auto_angle = 0;
 
       if (Limelight.hasValidTarget()) {
-        auto_speed = mDistancePID.get();
-        auto_angle = mAnglePID.get();
+        // Get the angle and pitch of the target
+        double goal_angle = Limelight.getTargetXAngle() + kLimelightAngle;
+        double goal_pitch = Limelight.getTargetYAngle() + kLimelightPitch;
+    
+        // Get the height of the goal reletive to the limelight
+        double goal_height = kGoalHeight - kLimelightHeight;
+    
+        // Get the distance of the the target from the limelight using geometry
+        double goal_dist = goal_height / Math.tan(Math.toRadians(goal_pitch)) - kLimelightDistance;
+    
+        // Get PID on distance and angle
+        auto_speed = mDistancePID.update(goal_dist, kTargetDistance);
+        auto_angle = mAnglePID.update(goal_angle, 0.0);
 
         // If the angle is good, then start moving
-        if ((Math.abs(mAnglePID.getError()) < kAngleError) && (Math.abs(mDistancePID.getError()) > kDistanceError)) {
+        if (Math.abs(mAnglePID.getError()) < kAngleError) {
           auto_angle *= 0.05;
         }
 
         // Otherwise start turning towards the target
-        else {
+        else if (Math.abs(mDistancePID.getError()) > kDistanceError) {
           auto_speed *= 0.05;
         }
       }
