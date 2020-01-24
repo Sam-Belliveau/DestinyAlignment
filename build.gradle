@@ -58,7 +58,7 @@ dependencies {
     // upon debugging
     simulation wpi.deps.sim.gui(wpi.platforms.desktop, false)
 
-    compile files("./StuyLib-2020.1.8.5.jar")
+    compile files("./StuyLib-2020.1.8.5.1.jar")
 }
 
 // Setting up my Jar File. In this case, adding all libraries into the main jar ('fat jar')

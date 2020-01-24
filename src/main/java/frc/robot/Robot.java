@@ -97,52 +97,57 @@ public class Robot extends TimedRobot {
   public boolean mAutoMode = false;
 
   // Feet, units dont matter as long as they are consistant
-  public double kGoalHeight = toFeet(7, 7);
+  public double kGoalHeight;
 
   // How far away from the goal we want to be
-  public double kTargetDistance = toFeet(10, 0);
+  public double kTargetDistance;
 
   // Information about the Limelights Position
-  public double kLimelightHeight = toFeet(2, 8); // ft
-  public double kLimelightDistance = toFeet(2, 0); // ft from shooter
-  public double kLimelightPitch = 28; // deg
-  public double kLimelightAngle = 0; // deg
+  public double kLimelightHeight; // ft
+  public double kLimelightDistance; // ft from shooter
+  public double kLimelightPitch; // deg
+  public double kLimelightAngle; // deg
 
   // Information for aligning algorithms
-  public double kDistanceError = 0.25;
-  public double kDistance_P = 0.8;
-  public double kDistance_I = 0.0;
-  public double kDistance_D = 0.4;
+  public double kDistanceError;
+  public double kDistance_P;
+  public double kDistance_I;
+  public double kDistance_D;
 
-  public double kAngleError = 2.5;
-  public double kAngle_P = 0.2;
-  public double kAngle_I = 0.0;
-  public double kAngle_D = 0.1;
+  public double kAngleError;
+  public double kAngle_P;
+  public double kAngle_I;
+  public double kAngle_D;
 
   // Amount that user has control over the robot when aligning
-  public double kUserBias = 0.3;
+  public double kUserBias;
 
   public void resetSmartDashboard() {
-    SmartDashboard.putNumber("Goal Height", kGoalHeight);
 
-    SmartDashboard.putNumber("Target Goal Distance", kTargetDistance);
+    // Feet, units dont matter as long as they are consistant
+    SmartDashboard.putNumber("Goal Height", kGoalHeight = toFeet(7, 6));
 
-    SmartDashboard.putNumber("Limelight Height", kLimelightHeight);
-    SmartDashboard.putNumber("Limelight Distance", kLimelightDistance);
-    SmartDashboard.putNumber("Limelight Pitch", kLimelightPitch);
-    SmartDashboard.putNumber("Limelight Angle", kLimelightAngle);
+    // How far away from the goal we want to be
+    SmartDashboard.putNumber("Target Goal Distance", kTargetDistance = toFeet(10, 0));
 
-    SmartDashboard.putNumber("Max Distance Error", kDistanceError);
-    SmartDashboard.putNumber("Distance_P", kDistance_P);
-    SmartDashboard.putNumber("Distance_I", kDistance_I);
-    SmartDashboard.putNumber("Distance_D", kDistance_D);
+    // Information about the Limelights Position
+    SmartDashboard.putNumber("Limelight Height", kLimelightHeight = toFeet(2, 7));
+    SmartDashboard.putNumber("Limelight Distance", kLimelightDistance = toFeet(3, 0));
+    SmartDashboard.putNumber("Limelight Pitch", kLimelightPitch = 17);
+    SmartDashboard.putNumber("Limelight Angle", kLimelightAngle = 0);
 
-    SmartDashboard.putNumber("Max Angle Error", kAngleError);
-    SmartDashboard.putNumber("Angle_P", kAngle_P);
-    SmartDashboard.putNumber("Angle_I", kAngle_I);
-    SmartDashboard.putNumber("Angle_D", kAngle_D);
+    // Information for aligning algorithms
+    SmartDashboard.putNumber("Max Distance Error", kDistanceError = 0.25);
+    SmartDashboard.putNumber("Distance_P", kDistance_P = 0.8);
+    SmartDashboard.putNumber("Distance_I", kDistance_I = 0.0);
+    SmartDashboard.putNumber("Distance_D", kDistance_D = 0.4);
 
-    SmartDashboard.putNumber("User Bias", kUserBias);
+    SmartDashboard.putNumber("Max Angle Error", kAngleError = 2.5);
+    SmartDashboard.putNumber("Angle_P", kAngle_P = 0.2);
+    SmartDashboard.putNumber("Angle_I", kAngle_I = 0.0);
+    SmartDashboard.putNumber("Angle_D", kAngle_D = 0.1);
+
+    SmartDashboard.putNumber("User Bias", kUserBias = 0.3);
   }
 
   public void getSmartDashboard() {
@@ -177,7 +182,6 @@ public class Robot extends TimedRobot {
   }
 
   public PIDController mAnglePID = new PIDController(kAngle_P, kAngle_I, kAngle_D);
-
   public PIDController mDistancePID = new PIDController(kDistance_P, kDistance_I, kDistance_D);
 
   @Override
