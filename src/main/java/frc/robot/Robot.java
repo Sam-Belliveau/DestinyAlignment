@@ -8,11 +8,12 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import com.stuypulse.stuylib.input.Gamepad;
 import com.stuypulse.stuylib.input.gamepads.Logitech;
 import com.stuypulse.stuylib.input.gamepads.NetKeyGamepad;
+import com.stuypulse.stuylib.input.gamepads.PS4;
 import com.stuypulse.stuylib.math.*;
 import com.stuypulse.stuylib.streams.*;
 import com.stuypulse.stuylib.streams.filters.*;
 import com.stuypulse.stuylib.network.limelight.*;
-import com.stuypulse.stuylib.control.PIDController;
+import com.stuypulse.stuylib.control.*;
 
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_VictorSPX;
@@ -32,6 +33,7 @@ public class Robot extends TimedRobot {
   private DifferentialDrive differentialDrive;
 
   private WPI_VictorSPX shooterMotor;
+  private WPI_TalonSRX intakeMotor = new WPI_TalonSRX(6);
 
   @Override
   public void robotInit() {
@@ -85,12 +87,13 @@ public class Robot extends TimedRobot {
   }
 
   public Gamepad gamepad = new Logitech.XMode(0);
+  public Gamepad operator = new PS4(1);
 
   public IStream mRawSpeed = () -> gamepad.getRawRightTriggerAxis() - gamepad.getRawLeftTriggerAxis();
-  public IStream mRawAngle = () -> gamepad.getLeftX();
+  public IStream mSpeed = new FilteredIStream(mRawSpeed, (x) -> SLMath.square(x), new RollingAverage(24));
 
-  public IStream mSpeed = new FilteredIStream(mRawSpeed, new RollingAverage(48));
-  public IStream mAngle = new FilteredIStream(mRawAngle, new RollingAverage(24));
+  public IStream mRawAngle = () -> gamepad.getLeftX();
+  public IStream mAngle = new FilteredIStream(mRawAngle, (x) -> SLMath.square(x), new RollingAverage(8));
 
   // Feet, units dont matter as long as they are consistant
   public double kGoalHeight;
@@ -135,18 +138,26 @@ public class Robot extends TimedRobot {
 
     // Distance Smoothing (rolling average 24)
     // Speed Smoothing (rolling average 12)
-    SmartDashboard.putNumber("Distance_P", kDistance_P = 0.36);
+    SmartDashboard.putNumber("Distance_P", kDistance_P = 0.132);
     SmartDashboard.putNumber("Distance_I", kDistance_I = 0.01);
-    SmartDashboard.putNumber("Distance_D", kDistance_D = 0.06);
+    SmartDashboard.putNumber("Distance_D", kDistance_D = 0.025);
 
     // Angle Error Smoothing (n / a)
     // Angle Smoothing (rolling average 6)
     SmartDashboard.putNumber("Max Angle Error", kAngleError = 2);
-    SmartDashboard.putNumber("Angle_P", kAngle_P = 0.16);
-    SmartDashboard.putNumber("Angle_I", kAngle_I = 0.01);
-    SmartDashboard.putNumber("Angle_D", kAngle_D = 0.015);
+    SmartDashboard.putNumber("Angle_P", kAngle_P = 0.055);
+    SmartDashboard.putNumber("Angle_I", kAngle_I = 0.014);
+    SmartDashboard.putNumber("Angle_D", kAngle_D = 0.005);
 
     SmartDashboard.putNumber("User Bias", kUserBias = 0.0);
+
+    mAnglePID.setOutputFilter(new RollingAverage(6));
+    mAnglePIDCalculator.setOutputFilter(new RollingAverage(6));
+
+    mDistancePID.setErrorFilter(new RollingAverage(24));
+    mDistancePID.setOutputFilter(new RollingAverage(12));
+    mSpeedPIDCalculator.setErrorFilter(new RollingAverage(24));
+    mSpeedPIDCalculator.setOutputFilter(new RollingAverage(12));
   }
 
   public void getSmartDashboard() {
@@ -182,22 +193,47 @@ public class Robot extends TimedRobot {
   public PIDController mAnglePID = new PIDController(kAngle_P, kAngle_I, kAngle_D);
   public PIDController mDistancePID = new PIDController(kDistance_P, kDistance_I, kDistance_D);
 
-  public IStreamFilter mDistanceFilter = new RollingAverage(24);
-  public IStreamFilter mSpeedPIDFilter = new RollingAverage(12);
-  public IStreamFilter mAnglePIDFilter = new RollingAverage(6);
+  public PIDCalculator mAnglePIDCalculator = new PIDCalculator(0.7);
+  public PIDCalculator mSpeedPIDCalculator = new PIDCalculator(0.5);
 
   @Override
   public void teleopPeriodic() {
     double speed = mSpeed.get();
     double angle = mAngle.get();
 
+    intakeMotor.set((operator.getRawLeftButton() ? -1 : 0) + (operator.getRawRightButton() ? 1 : 0));
+
     // Reset Settings
     if (gamepad.getRawRightButton()) {
-      resetSmartDashboard();
+      getSmartDashboard();
+      Limelight.setLEDMode(Limelight.LEDMode.FORCE_ON);
+
+      speed = 0.0;
+      angle = mAnglePIDCalculator.update(Limelight.getTargetXAngle());
+
+      SmartDashboard.putString("CalcPID", mAnglePIDCalculator.getPIDController().toString());
+    }
+
+    else if (gamepad.getRawTopButton()) {
+      getSmartDashboard();
+      Limelight.setLEDMode(Limelight.LEDMode.FORCE_ON);
+
+      double goal_pitch = Limelight.getTargetYAngle() + kLimelightPitch;
+    
+      // Get the height of the goal reletive to the limelight
+      double goal_height = kGoalHeight - kLimelightHeight;
+  
+      // Get the distance of the the target from the limelight using geometry
+      double goal_dist = goal_height / Math.tan(Math.toRadians(goal_pitch)) - kLimelightDistance;
+
+      speed = mSpeedPIDCalculator.update(goal_dist, kTargetDistance);
+      angle = mAnglePID.update(Limelight.getTargetXAngle());
+
+      SmartDashboard.putString("SCalcPID", mSpeedPIDCalculator.getPIDController().toString());
     }
 
     // Check if allignment button is pressed
-    if (gamepad.getRawLeftButton()) {
+    else if (gamepad.getRawLeftButton()) {
       getSmartDashboard();
       Limelight.setLEDMode(Limelight.LEDMode.FORCE_ON);
 
@@ -220,9 +256,8 @@ public class Robot extends TimedRobot {
         SmartDashboard.putNumber("Target X Angle", goal_angle);
         SmartDashboard.putNumber("Target Y Angle", goal_pitch);
 
-        // Get PID on distance and angle
-        auto_speed = mDistancePID.update(goal_dist, kTargetDistance);
         auto_angle = mAnglePID.update(goal_angle, 0.0);
+        auto_speed = mDistancePID.update(goal_dist, kTargetDistance);
 
         // If the angle is good, then start moving
         if (Math.abs(mAnglePID.getError()) > kAngleError) {
@@ -232,8 +267,8 @@ public class Robot extends TimedRobot {
 
       // Limit speed and angle to prevent the alignment algorithm
       // from overriding the user inputs / give crazy values
-      auto_speed = mSpeedPIDFilter.get(SLMath.limit(auto_speed, -1, 1));
-      auto_angle = mAnglePIDFilter.get(SLMath.limit(auto_angle, -1, 1));
+      auto_speed = SLMath.limit(auto_speed, -1, 1);
+      auto_angle = SLMath.limit(auto_angle, -1, 1);
       speed = SLMath.limit(speed, -1, 1);
       angle = SLMath.limit(angle, -1, 1);
 
